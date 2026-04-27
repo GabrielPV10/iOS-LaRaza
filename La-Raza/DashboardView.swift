@@ -114,14 +114,31 @@ struct DashboardView: View {
 
                         // Grid de módulos
                         LazyVGrid(columns: columnas, spacing: 16) {
-                            ForEach(modulos, id: \.titulo) { modulo in
-                                if modulo.titulo == "Perfil" {
-                                    NavigationLink(destination: PerfilView(estaAutenticado: $estaAutenticado)) {
+                            ForEach(Array(modulos.enumerated()), id: \.offset) { index, modulo in
+                                Group {
+                                    if modulo.titulo == "Perfil" {
+                                        NavigationLink(destination: PerfilView(estaAutenticado: $estaAutenticado)) {
+                                            ModuloCard(modulo: modulo)
+                                        }
+                                        .buttonStyle(.plain)
+                                    } else if modulo.titulo == "Productos" {
+                                        NavigationLink(destination: ProductosView()) {
+                                            ModuloCard(modulo: modulo)
+                                        }
+                                        .buttonStyle(.plain)
+                                    } else if modulo.titulo == "Nueva Visita" {
+                                        NavigationLink(destination: NuevaVisitaView()) {
+                                            ModuloCard(modulo: modulo)
+                                        }
+                                        .buttonStyle(.plain)
+                                    } else if modulo.titulo == "Historial" {
+                                        NavigationLink(destination: HistorialView()) {
+                                            ModuloCard(modulo: modulo)
+                                        }
+                                        .buttonStyle(.plain)
+                                    } else {
                                         ModuloCard(modulo: modulo)
                                     }
-                                    .buttonStyle(.plain)
-                                } else {
-                                    ModuloCard(modulo: modulo)
                                 }
                             }
                         }
