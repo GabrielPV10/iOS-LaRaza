@@ -5,6 +5,7 @@
 //  Created by Alumno on 25/03/26.
 //
 import SwiftUI
+import SwiftData
 
 @main
 struct La_RazaApp: App {
@@ -20,5 +21,10 @@ struct La_RazaApp: App {
                 }
             }
         }
+        // SwiftData — crea la BD local en el iPhone
+        .modelContainer(for: [
+            VisitaLocal.self,
+            ProductoLocal.self
+        ])
     }
 }
