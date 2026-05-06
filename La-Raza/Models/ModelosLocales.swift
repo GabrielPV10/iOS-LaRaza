@@ -8,8 +8,6 @@
 import SwiftData
 import Foundation
 
-// ── VISITA LOCAL ────────────────────────────────────────────────
-// Refleja la tabla laraza.visitas_tecnicas en PostgreSQL
 @Model
 class VisitaLocal {
     var id: UUID
