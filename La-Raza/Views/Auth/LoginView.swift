@@ -33,25 +33,21 @@ extension Color {
     }
 }
 
-// MARK: - Login View
 struct LoginView: View {
+    @Binding var estaAutenticado: Bool
+    @StateObject private var vm = LoginViewModel()
+
     @State private var usuario: String = ""
     @State private var contrasena: String = ""
     @State private var mostrarContrasena: Bool = false
 
-    @Binding var estaAutenticado: Bool
-
     var body: some View {
         ZStack {
 
-            // ── FONDO CON DEGRADADO RADIAL ───────────────────────
-            // Verde brillante arriba al centro, oscuro hacia las esquinas
+            // ── FONDO DEGRADADO ──────────────────────────────────
             ZStack {
-                // Base oscura
-                Color(hex: "1E4D1E")
-                    .ignoresSafeArea()
+                Color(hex: "1E4D1E").ignoresSafeArea()
 
-                // Degradado radial — brillo en el centro superior
                 RadialGradient(
                     colors: [
                         Color(hex: "4CAF50").opacity(0.9),
@@ -64,12 +60,8 @@ struct LoginView: View {
                 )
                 .ignoresSafeArea()
 
-                // Toque de brillo extra arriba
                 LinearGradient(
-                    colors: [
-                        Color(hex: "56C45A").opacity(0.3),
-                        Color.clear
-                    ],
+                    colors: [Color(hex: "56C45A").opacity(0.3), Color.clear],
                     startPoint: .top,
                     endPoint: .center
                 )
@@ -77,53 +69,66 @@ struct LoginView: View {
             }
 
             VStack(spacing: 0) {
-
                 Spacer()
 
-                // ── LOGO ─────────────────────────────────────────
-                Image("LogoRaza")
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(Circle())
-                    .frame(width: 130, height: 130)
-                    .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
-                    .padding(.bottom, 24)
+                // ── LOGO + NOMBRE ────────────────────────────────
+                VStack(spacing: 8) {
+                    Image("LogoRaza")
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(Circle())
+                        .frame(width: 130, height: 130)
+                        .shadow(
+                            color: .black.opacity(0.3),
+                            radius: 12, x: 0, y: 6
+                        )
 
-                // ── CARD GLASSMORPHISM ───────────────────────────
+                    Text("LA RAZA")
+                        .font(.system(size: 28, weight: .black))
+                        .foregroundColor(.white)
+                        .tracking(4)
+
+                    Text("Semillas y Agroinsumos")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.7))
+                        .tracking(1)
+                }
+                .padding(.bottom, 32)
+
+                // ── CARD LOGIN ───────────────────────────────────
                 VStack(alignment: .leading, spacing: 16) {
 
-                    Text("Iniciar Sesion")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(Color(hex: "1A1A1A"))
+                    Text("Iniciar sesión")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(Color(hex: "1E7A00"))
 
                     Text("Ingresa tus credenciales")
                         .font(.system(size: 13))
-                        .foregroundColor(Color(hex: "555555"))
+                        .foregroundColor(Color(hex: "888888"))
                         .padding(.top, -8)
 
                     // Campo Usuario
                     HStack {
                         Image(systemName: "person")
-                            .foregroundColor(Color(hex: "555555"))
+                            .foregroundColor(Color(hex: "3CB504"))
                             .frame(width: 20)
                         TextField("Usuario", text: $usuario)
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
                             .foregroundColor(Color(hex: "1A1A1A"))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .background(Color.white.opacity(0.75))
-                    .cornerRadius(25)
+                    .padding()
+                    .background(Color(hex: "F0FAF0"))
+                    .cornerRadius(12)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 25)
-                            .stroke(Color.white.opacity(0.5), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(hex: "3CB504").opacity(0.4), lineWidth: 1)
                     )
 
                     // Campo Contraseña
                     HStack {
                         Image(systemName: "lock")
-                            .foregroundColor(Color(hex: "555555"))
+                            .foregroundColor(Color(hex: "3CB504"))
                             .frame(width: 20)
                         if mostrarContrasena {
                             TextField("Contraseña", text: $contrasena)
@@ -134,60 +139,73 @@ struct LoginView: View {
                             SecureField("Contraseña", text: $contrasena)
                                 .foregroundColor(Color(hex: "1A1A1A"))
                         }
-                        Button(action: {
-                            mostrarContrasena.toggle()
-                        }) {
+                        Button(action: { mostrarContrasena.toggle() }) {
                             Image(systemName: mostrarContrasena ? "eye" : "eye.slash")
-                                .foregroundColor(Color(hex: "555555"))
+                                .foregroundColor(Color(hex: "888888"))
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .background(Color.white.opacity(0.75))
-                    .cornerRadius(25)
+                    .padding()
+                    .background(Color(hex: "F0FAF0"))
+                    .cornerRadius(12)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 25)
-                            .stroke(Color.white.opacity(0.5), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(hex: "3CB504").opacity(0.4), lineWidth: 1)
                     )
+
+                    // Mensaje de error
+                    if let error = vm.error {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(Color(hex: "E53935"))
+                                .font(.system(size: 14))
+                            Text(error)
+                                .font(.system(size: 13))
+                                .foregroundColor(Color(hex: "E53935"))
+                        }
+                        .padding(.horizontal, 4)
+                        .transition(.opacity)
+                    }
 
                     // Botón Entrar
                     Button(action: {
-                        if usuario == "admin" && contrasena == "1234" {
-                            estaAutenticado = true
-                        }
+                        vm.iniciarSesion(
+                            username: usuario,
+                            password: contrasena,
+                            estaAutenticado: $estaAutenticado
+                        )
                     }) {
-                        Text("Entrar")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 15)
-                            .background(
-                                LinearGradient(
-                                    colors: [Color(hex: "4CAF50"), Color(hex: "2E7D32")],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
+                        ZStack {
+                            LinearGradient(
+                                colors: [
+                                    Color(hex: "4CAF50"),
+                                    Color(hex: "2E7D32")
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
                             )
-                            .cornerRadius(25)
+                            .cornerRadius(14)
+
+                            if vm.cargando {
+                                ProgressView()
+                                    .progressViewStyle(
+                                        CircularProgressViewStyle(tint: .white)
+                                    )
+                            } else {
+                                Text("Entrar")
+                                    .font(.system(size: 17, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .tracking(1)
+                            }
+                        }
+                        .frame(height: 52)
                     }
+                    .disabled(vm.cargando)
                     .padding(.top, 4)
                 }
                 .padding(28)
-                // Fondo glassmorphism de la card
-                .background(
-                    ZStack {
-                        Color.white.opacity(0.15)
-                        // Blur simulado con capas
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color(hex: "C8D8C8").opacity(0.35))
-                    }
-                )
-                .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
+                .background(Color.white)
+                .cornerRadius(24)
+                .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: 8)
                 .padding(.horizontal, 28)
 
                 Spacer()
@@ -195,9 +213,10 @@ struct LoginView: View {
                 Text("Sistema de Gestión Agropecuaria v1.0")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.5))
-                    .padding(.bottom, 30)
+                    .padding(.bottom, 24)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: vm.error)
     }
 }
 

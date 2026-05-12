@@ -2,22 +2,25 @@
 //  ProductosView.swift
 //  La-Raza
 //
-//  Created by Alumno on 21/04/26.
-//
 
 import SwiftUI
+import SwiftData
 
 struct ProductosView: View {
+    @Environment(\.dismiss) var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @StateObject private var vm = ProductosViewModel()
+
     @State private var busqueda: String = ""
-    @State private var categoriaSeleccionada: String = "Todas"
+    @State private var productoSeleccionado: ProductoLocal? = nil   // ← sheet
 
-    let categorias = ["Todas", "Fertilizantes", "Herbicidas", "Insecticidas", "Semillas", "Fungicidas"]
-
-    var productosFiltrados: [Producto] {
-        Producto.ejemplos.filter { producto in
-            let coincideCategoria = categoriaSeleccionada == "Todas" || producto.categoria == categoriaSeleccionada
-            let coincideBusqueda  = busqueda.isEmpty || producto.nombre.localizedCaseInsensitiveContains(busqueda)
-            return coincideCategoria && coincideBusqueda
+    var productosFiltrados: [ProductoLocal] {
+        if busqueda.isEmpty { return vm.productos }
+        let q = busqueda.lowercased()
+        return vm.productos.filter {
+            $0.nombre.lowercased().contains(q) ||
+            $0.clave.lowercased().contains(q)  ||
+            $0.marca.lowercased().contains(q)
         }
     }
 
@@ -35,27 +38,33 @@ struct ProductosView: View {
 
                 VStack(spacing: 10) {
                     HStack {
-                        Button(action: {}) {
+                        Button(action: { dismiss() }) {
                             Image(systemName: "chevron.left")
                                 .foregroundColor(.white)
                                 .font(.system(size: 18, weight: .semibold))
                         }
                         Spacer()
-                        Text("Catálogo de Productos")
+                        Text("Inventario")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundColor(.white)
                         Spacer()
-                        // Espacio para centrar el título
-                        Image(systemName: "chevron.left")
-                            .opacity(0)
+                        Button(action: {
+                            busqueda = ""
+                            vm.cargarProductos(modelContext: modelContext)
+                        }) {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundColor(.white)
+                                .font(.system(size: 16, weight: .medium))
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
                     // Barra de búsqueda
-                    HStack {
+                    HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.white.opacity(0.7))
+
                         TextField("", text: $busqueda,
                             prompt: Text("Buscar producto...")
                                 .foregroundColor(.white.opacity(0.6))
@@ -63,6 +72,23 @@ struct ProductosView: View {
                         .foregroundColor(.white)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
+                        .onChange(of: busqueda) { _, nuevo in
+                            if nuevo.isEmpty {
+                                vm.cargarProductos(modelContext: modelContext)
+                            } else if nuevo.count >= 2 {
+                                vm.buscar(nuevo, modelContext: modelContext)
+                            }
+                        }
+
+                        if !busqueda.isEmpty {
+                            Button(action: {
+                                busqueda = ""
+                                vm.cargarProductos(modelContext: modelContext)
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                        }
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -74,150 +100,367 @@ struct ProductosView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
 
-            // ── FILTROS DE CATEGORÍA ─────────────────────────────
-            ScrollView(.horizontal, showsIndicators: false) {
+            // Banner offline
+            if vm.modoOffline {
                 HStack(spacing: 8) {
-                    ForEach(categorias, id: \.self) { categoria in
-                        Button(action: {
-                            categoriaSeleccionada = categoria
-                        }) {
-                            Text(categoria)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(categoriaSeleccionada == categoria ? .white : Color(hex: "444444"))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    categoriaSeleccionada == categoria
-                                    ? Color(hex: "3CB504")
-                                    : Color.white
-                                )
-                                .cornerRadius(20)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(
-                                            categoriaSeleccionada == categoria
-                                            ? Color.clear
-                                            : Color(hex: "CCCCCC"),
-                                            lineWidth: 1
-                                        )
-                                )
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 13))
+                    Text("Sin conexión · mostrando datos locales")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(Color(hex: "E6A817"))
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(Color(hex: "FFF3D6"))
+            }
+
+            // Contador
+            if !vm.cargando && vm.error == nil {
+                HStack {
+                    Text("\(productosFiltrados.count) productos")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "3CB504"))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color(hex: "F5F5F5"))
+            }
+
+            // ── CONTENIDO ────────────────────────────────────────
+            ZStack {
+                Color(hex: "F5F5F5").ignoresSafeArea()
+
+                if vm.cargando && vm.productos.isEmpty {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(
+                                CircularProgressViewStyle(tint: Color(hex: "3CB504"))
+                            )
+                            .scaleEffect(1.3)
+                        Text("Cargando inventario...")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(hex: "888888"))
+                    }
+
+                } else if let error = vm.error, vm.productos.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "wifi.slash")
+                            .font(.system(size: 56))
+                            .foregroundColor(Color(hex: "E53935").opacity(0.7))
+                        Text(error)
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(hex: "888888"))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                        Button(action: { vm.cargarProductos(modelContext: modelContext) }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Reintentar")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(Color(hex: "3CB504"))
+                            .cornerRadius(12)
                         }
+                    }
+
+                } else if productosFiltrados.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "shippingbox")
+                            .font(.system(size: 48))
+                            .foregroundColor(Color(hex: "CCCCCC"))
+                        Text("No se encontraron productos")
+                            .font(.system(size: 15))
+                            .foregroundColor(Color(hex: "888888"))
+                    }
+
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(productosFiltrados) { producto in
+                                // ← Button en lugar de NavigationLink
+                                Button(action: { productoSeleccionado = producto }) {
+                                    ProductoCard(producto: producto)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(12)
+
+                        if vm.cargando {
+                            ProgressView().padding()
+                        }
+                    }
+                }
+            }
+        }
+        .navigationBarHidden(true)
+        .onAppear {
+            if vm.productos.isEmpty {
+                vm.cargarProductos(modelContext: modelContext)
+            }
+        }
+        // ── SHEET DE DETALLE ─────────────────────────────────────
+        .sheet(item: $productoSeleccionado) { producto in
+            DetalleProductoSheet(producto: producto)
+        }
+    }
+}
+
+// MARK: - Sheet de detalle (reemplaza DetalleProductoView)
+
+private struct DetalleProductoSheet: View {
+    let producto: ProductoLocal
+    @Environment(\.dismiss) var dismiss
+
+    var stockColor: Color {
+        if producto.stock <= 0 { return Color(hex: "E53935") }
+        if producto.stock < 10 { return Color(hex: "E6A817") }
+        return Color(hex: "3CB504")
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+
+            // ── HANDLE + HEADER ──────────────────────────────────
+            ZStack {
+                LinearGradient(
+                    colors: [Color(hex: "3CB504"), Color(hex: "1E7A00")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                HStack {
+                    Spacer()
+                    Text("Detalle del Producto")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white)
+                    Spacer()
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.white.opacity(0.8))
+                            .font(.system(size: 22))
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 14)
             }
-            .background(Color.white)
+            .fixedSize(horizontal: false, vertical: true)
 
-            // Contador
-            HStack {
-                Text("\(productosFiltrados.count) productos")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color(hex: "888888"))
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(hex: "F5F5F5"))
-
-            // ── LISTA DE PRODUCTOS ───────────────────────────────
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(productosFiltrados) { producto in
-                        NavigationLink(destination: DetalleProductoView(producto: producto)) {
-                            ProductoRow(producto: producto)
-                        }
-                        .buttonStyle(.plain)
+                VStack(spacing: 16) {
 
+                    // ── CARD PRINCIPAL ───────────────────────────
+                    VStack(spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(hex: "3CB504").opacity(0.12))
+                                .frame(width: 72, height: 72)
+                            Image(systemName: "shippingbox")
+                                .font(.system(size: 32))
+                                .foregroundColor(Color(hex: "3CB504"))
+                        }
+                        Text(producto.nombre)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(Color(hex: "1A1A1A"))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+                        Text(producto.clave)
+                            .font(.system(size: 13))
+                            .foregroundColor(Color(hex: "888888"))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                    .background(Color.white)
+                    .cornerRadius(14)
+                    .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+
+                    // ── PRECIO Y STOCK ───────────────────────────
+                    HStack(spacing: 12) {
+                        InfoTile(
+                            icono: "dollarsign.circle",
+                            iconoColor: Color(hex: "3CB504"),
+                            etiqueta: "Precio",
+                            valor: "$\(String(format: "%.2f", producto.precio))",
+                            valorColor: Color(hex: "3CB504")
+                        )
+                        InfoTile(
+                            icono: "cube.box",
+                            iconoColor: stockColor,
+                            etiqueta: "Stock",
+                            valor: producto.stock <= 0 ? "Sin stock" : "\(producto.stock) uds",
+                            valorColor: stockColor
+                        )
+                    }
+
+                    // ── INFORMACIÓN ──────────────────────────────
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(Color(hex: "3CB504"))
+                            Text("Información")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(Color(hex: "1A1A1A"))
+                        }
+                        .padding(.bottom, 12)
+
+                        FilaDetalle(icono: "barcode",  etiqueta: "Clave",  valor: producto.clave)
+
+                        if !producto.marca.isEmpty {
+                            Divider()
+                            FilaDetalle(icono: "tag", etiqueta: "Marca", valor: producto.marca)
+                        }
+                        if producto.precioMayoreo > 0 {
+                            Divider()
+                            FilaDetalle(
+                                icono: "cart",
+                                etiqueta: "Precio mayoreo",
+                                valor: "$\(String(format: "%.2f", producto.precioMayoreo))"
+                            )
+                        }
                         Divider()
-                            .padding(.leading, 72)
+                        FilaDetalle(
+                            icono: "clock",
+                            etiqueta: "Actualizado",
+                            valor: producto.ultimaActualizacion.formatted(
+                                date: .abbreviated, time: .shortened
+                            )
+                        )
+                    }
+                    .padding(16)
+                    .background(Color.white)
+                    .cornerRadius(14)
+                    .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+
+                    // ── DESCRIPCIÓN ──────────────────────────────
+                    if !producto.descripcion.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "text.alignleft")
+                                    .foregroundColor(Color(hex: "3CB504"))
+                                Text("Descripción")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundColor(Color(hex: "1A1A1A"))
+                            }
+                            Text(producto.descripcion)
+                                .font(.system(size: 14))
+                                .foregroundColor(Color(hex: "555555"))
+                                .lineSpacing(4)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(Color.white)
+                        .cornerRadius(14)
+                        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
                     }
                 }
-                .background(Color.white)
-                .cornerRadius(12)
                 .padding(16)
             }
             .background(Color(hex: "F5F5F5"))
         }
-        .navigationBarHidden(true)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }
 
-// ── FILA DE PRODUCTO ─────────────────────────────────────────────
-struct ProductoRow: View {
-    let producto: Producto
+// MARK: - Subviews reutilizables
+
+private struct InfoTile: View {
+    let icono: String
+    let iconoColor: Color
+    let etiqueta: String
+    let valor: String
+    let valorColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: icono).foregroundColor(iconoColor)
+                Text(etiqueta)
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(hex: "888888"))
+            }
+            Text(valor)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(valorColor)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.white)
+        .cornerRadius(14)
+        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+    }
+}
+
+// MARK: - ProductoCard (sin cambios)
+
+struct ProductoCard: View {
+    let producto: ProductoLocal
+
+    var stockColor: Color {
+        if producto.stock <= 0  { return Color(hex: "E53935") }
+        if producto.stock < 10  { return Color(hex: "E6A817") }
+        return Color(hex: "3CB504")
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-
-            // Ícono con color por categoría
             ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(hex: producto.colorCategoria))
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(hex: "3CB504").opacity(0.15))
                     .frame(width: 44, height: 44)
                 Image(systemName: "shippingbox")
-                    .font(.system(size: 18))
-                    .foregroundColor(colorIcono(categoria: producto.categoria))
+                    .font(.system(size: 20))
+                    .foregroundColor(Color(hex: "3CB504"))
             }
 
-            // Info
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(producto.nombre)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(Color(hex: "1A1A1A"))
-
-                HStack(spacing: 6) {
-                    // Badge categoría
-                    Text(producto.categoria)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(colorIcono(categoria: producto.categoria))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Color(hex: producto.colorCategoria))
-                        .cornerRadius(10)
-
-                    // Stock
-                    if producto.stock == 0 {
-                        Text("Sin stock")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color(hex: "E53935"))
-                    } else {
-                        Text("\(Int(producto.stock)) \(producto.unidad)")
-                            .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "888888"))
-                    }
+                    .lineLimit(2)
+                Text(producto.clave)
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "888888"))
+                if !producto.marca.isEmpty {
+                    Text(producto.marca)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "888888"))
                 }
             }
 
             Spacer()
 
-            // Precio + flecha
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: 6) {
                 Text("$\(String(format: "%.2f", producto.precio))")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(Color(hex: "3CB504"))
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12))
-                    .foregroundColor(Color(hex: "CCCCCC"))
+                Text(producto.stock <= 0 ? "Sin stock" : "Stock: \(producto.stock)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(stockColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(stockColor.opacity(0.15))
+                    .cornerRadius(20)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .background(Color.white)
-    }
-
-    func colorIcono(categoria: String) -> Color {
-        switch categoria {
-        case "Fertilizantes": return Color(hex: "3CB504")
-        case "Herbicidas":    return Color(hex: "E6A817")
-        case "Insecticidas":  return Color(hex: "E53935")
-        case "Semillas":      return Color(hex: "2196F3")
-        case "Fungicidas":    return Color(hex: "9C27B0")
-        default:              return Color(hex: "3CB504")
-        }
+        .cornerRadius(10)
+        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
     }
 }
+
+// MARK: - Nota ViewModels.swift
+// En ProductosViewModel.cargarProductos() cambia:
+//   APIService.shared.getArticulos(page: 1, limit: 50)
+// por:
+//   APIService.shared.getArticulos(page: 1, limit: 200)
+// Para igualar el comportamiento de Flutter (ProductosScreen carga 200 artículos).
 
 #Preview {
     NavigationStack {

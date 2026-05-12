@@ -11,6 +11,15 @@ import SwiftData
 struct La_RazaApp: App {
     @State private var estaAutenticado: Bool = false
 
+    init() {
+        // Cargar JWT guardado del login anterior
+        APIService.shared.cargarTokenGuardado()
+        // Si hay token guardado, saltar el login
+        if APIService.shared.token != nil {
+            _estaAutenticado = State(initialValue: true)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             NavigationStack {
@@ -21,10 +30,6 @@ struct La_RazaApp: App {
                 }
             }
         }
-        // SwiftData — crea la BD local en el iPhone
-        .modelContainer(for: [
-            VisitaLocal.self,
-            ProductoLocal.self
-        ])
+        .modelContainer(for: [VisitaLocal.self, ProductoLocal.self])
     }
 }

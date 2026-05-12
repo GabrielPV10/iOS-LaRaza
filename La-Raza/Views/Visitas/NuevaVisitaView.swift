@@ -6,29 +6,17 @@
 //
 
 import SwiftUI
+import SwiftData
 import CoreLocation
 
-// MARK: - Modelo de Visita
-struct Visita: Identifiable {
-    let id = UUID()
-    var nombreProductor: String
-    var ranchoEjido: String
-    var cultivo: String
-    var latitud: Double?
-    var longitud: Double?
-    var productosRecomendados: [String]
-    var notas: String
-    var fecha: Date = Date()
-}
-
-// MARK: - Location Manager
+// MARK: - LocationManager
 class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
 
-    @Published var latitud: Double? = nil
+    @Published var latitud:  Double? = nil
     @Published var longitud: Double? = nil
-    @Published var estado: String = "Sin ubicación"
-    @Published var cargando: Bool = false
+    @Published var estado:   String  = "Sin ubicación"
+    @Published var cargando: Bool    = false
 
     override init() {
         super.init()
@@ -38,18 +26,23 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func solicitarUbicacion() {
         cargando = true
-        estado = "Obteniendo ubicación..."
+        estado   = "Obteniendo ubicación..."
         manager.requestWhenInUseAuthorization()
         manager.requestLocation()
     }
 
+    func limpiar() {
+        latitud  = nil
+        longitud = nil
+        estado   = "Sin ubicación"
+    }
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        if let loc = locations.first {
-            latitud  = loc.coordinate.latitude
-            longitud = loc.coordinate.longitude
-            estado   = String(format: "%.5f, %.5f", loc.coordinate.latitude, loc.coordinate.longitude)
-            cargando = false
-        }
+        guard let loc = locations.first else { return }
+        latitud  = loc.coordinate.latitude
+        longitud = loc.coordinate.longitude
+        estado   = String(format: "%.5f, %.5f", loc.coordinate.latitude, loc.coordinate.longitude)
+        cargando = false
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -60,30 +53,32 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
 // MARK: - NuevaVisitaView
 struct NuevaVisitaView: View {
+    // ── Modo edición (opcional) — igual que visitaEditar en Flutter
+    var visitaEditar: VisitaLocal? = nil
+    var esEdicion: Bool { visitaEditar != nil }
+
     @Environment(\.dismiss) var dismiss
+    @Environment(\.modelContext) private var modelContext
+
     @StateObject private var locationManager = LocationManager()
+    @StateObject private var cultivosVM      = CultivosViewModel()
+    @StateObject private var visitasVM       = VisitasViewModel()
 
-    // Campos del formulario
+    // Campos
     @State private var nombreProductor: String = ""
-    @State private var ranchoEjido: String = ""
-    @State private var cultivoSeleccionado: String = ""
-    @State private var notas: String = ""
-    @State private var productosSeleccionados: Set<String> = []
-    @State private var mostrarAlertaGuardado: Bool = false
+    @State private var ranchoEjido:     String = ""
+    @State private var notas:           String = ""
+    @State private var cultivoSeleccionado: CultivoDTO? = nil
 
-    let cultivos = [
-        "Maíz", "Sorgo", "Soya", "Frijol", "Caña de azúcar",
-        "Chile", "Tomate", "Papaya", "Mango", "Plátano"
-    ]
-
-    let productosDisponibles = [
-        "Urea 46%", "Glifosato 480 SL", "Maíz Híbrido H-438",
-        "Clorpirifos 480 EC", "DAP 18-46-0", "Soya Cristalina",
-        "Mancozeb 80 WP", "Sulfato de Potasio"
-    ]
+    // Productos con búsqueda debounced
+    @State private var productosSeleccionados: [String]     = []
+    @State private var busquedaProducto:        String       = ""
+    @State private var resultadosBusqueda:      [ArticuloDTO] = []
+    @State private var buscandoProducto:        Bool         = false
+    @State private var searchTask: Task<Void, Never>?        = nil
 
     var formularioValido: Bool {
-        !nombreProductor.isEmpty && !ranchoEjido.isEmpty && !cultivoSeleccionado.isEmpty
+        !nombreProductor.isEmpty && !ranchoEjido.isEmpty && cultivoSeleccionado != nil
     }
 
     var body: some View {
@@ -93,8 +88,7 @@ struct NuevaVisitaView: View {
             ZStack {
                 LinearGradient(
                     colors: [Color(hex: "3CB504"), Color(hex: "1E7A00")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+                    startPoint: .topLeading, endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea(edges: .top)
 
@@ -105,7 +99,7 @@ struct NuevaVisitaView: View {
                             .font(.system(size: 18, weight: .semibold))
                     }
                     Spacer()
-                    Text("Nueva Visita")
+                    Text(esEdicion ? "Editar Visita" : "Nueva Visita")
                         .font(.system(size: 17, weight: .bold))
                         .foregroundColor(.white)
                     Spacer()
@@ -117,141 +111,237 @@ struct NuevaVisitaView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
 
-            // ── FORMULARIO ───────────────────────────────────────
+            // Banner de estado
+            if !visitasVM.mensajeEstado.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: visitasVM.guardadoExitoso
+                          ? "checkmark.circle.fill" : "clock.fill")
+                    Text(visitasVM.mensajeEstado)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(visitasVM.guardadoExitoso
+                                 ? Color(hex: "3CB504") : Color(hex: "E6A817"))
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(visitasVM.guardadoExitoso
+                            ? Color(hex: "D6F5D6") : Color(hex: "FFF3D6"))
+                .transition(.opacity)
+            }
+
             ScrollView {
                 VStack(spacing: 16) {
 
                     // SECCIÓN 1 — Datos del Productor
                     SeccionCard(icono: "person.2", titulo: "Datos del Productor") {
-                        CampoTexto(
-                            icono: "person",
-                            placeholder: "Nombre del productor",
-                            texto: $nombreProductor
-                        )
-
-                        CampoTexto(
-                            icono: "mappin",
-                            placeholder: "Rancho / Ejido",
-                            texto: $ranchoEjido
-                        )
+                        CampoTexto(icono: "person",  placeholder: "Nombre del productor", texto: $nombreProductor)
+                        CampoTexto(icono: "mappin",  placeholder: "Rancho / Ejido",       texto: $ranchoEjido)
                     }
 
-                    // SECCIÓN 2 — Cultivo
+                    // SECCIÓN 2 — Cultivo (API con fallback)
                     SeccionCard(icono: "leaf", titulo: "Cultivo") {
-                        Menu {
-                            ForEach(cultivos, id: \.self) { cultivo in
-                                Button(cultivo) {
-                                    cultivoSeleccionado = cultivo
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Image(systemName: "leaf")
-                                    .foregroundColor(Color(hex: "3CB504"))
-                                    .frame(width: 20)
-                                Text(cultivoSeleccionado.isEmpty ? "Selecciona el cultivo" : cultivoSeleccionado)
-                                    .foregroundColor(
-                                        cultivoSeleccionado.isEmpty
-                                        ? Color(hex: "AAAAAA")
-                                        : Color(hex: "1A1A1A")
-                                    )
-                                Spacer()
-                                Image(systemName: "chevron.down")
-                                    .foregroundColor(Color(hex: "3CB504"))
+                        if cultivosVM.cargando {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "3CB504")))
+                                    .scaleEffect(0.8)
+                                Text("Cargando cultivos...")
                                     .font(.system(size: 13))
+                                    .foregroundColor(Color(hex: "888888"))
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 14)
-                            .background(Color(hex: "F0FAF0"))
-                            .cornerRadius(10)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color(hex: "3CB504").opacity(0.4), lineWidth: 1)
-                            )
+                            .padding(.vertical, 8)
+                        } else {
+                            Menu {
+                                ForEach(cultivosVM.cultivos, id: \.id) { c in
+                                    Button(c.nombre) { cultivoSeleccionado = c }
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "leaf")
+                                        .foregroundColor(Color(hex: "3CB504"))
+                                        .frame(width: 20)
+                                    Text(cultivoSeleccionado?.nombre ?? "Selecciona el cultivo")
+                                        .foregroundColor(cultivoSeleccionado == nil
+                                                         ? Color(hex: "AAAAAA") : Color(hex: "1A1A1A"))
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .foregroundColor(Color(hex: "3CB504"))
+                                        .font(.system(size: 13))
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 14)
+                                .background(Color(hex: "F0FAF0"))
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color(hex: "3CB504").opacity(0.4), lineWidth: 1)
+                                )
+                            }
                         }
                     }
 
                     // SECCIÓN 3 — Ubicación GPS
                     SeccionCard(icono: "location.circle", titulo: "Ubicación GPS") {
-                        // Botón obtener ubicación
-                        Button(action: {
-                            locationManager.solicitarUbicacion()
-                        }) {
-                            HStack(spacing: 8) {
-                                if locationManager.cargando {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "3CB504")))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Image(systemName: "location.circle")
+                        if locationManager.latitud == nil {
+                            Button(action: { locationManager.solicitarUbicacion() }) {
+                                HStack(spacing: 8) {
+                                    if locationManager.cargando {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "3CB504")))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "location.circle")
+                                            .foregroundColor(Color(hex: "3CB504"))
+                                    }
+                                    Text(locationManager.cargando ? "Obteniendo..." : "Obtener ubicación actual")
+                                        .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(Color(hex: "3CB504"))
                                 }
-                                Text(locationManager.cargando ? "Obteniendo..." : "Obtener ubicación actual")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color(hex: "3CB504"))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(Color.white)
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color(hex: "3CB504"), lineWidth: 1.5)
+                                )
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
+                            .disabled(locationManager.cargando)
+                        } else {
+                            // Ubicación obtenida — botones Actualizar / Quitar
+                            HStack(spacing: 10) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(Color(hex: "3CB504"))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Ubicación obtenida ✅")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(Color(hex: "1E7A00"))
+                                    Text(locationManager.estado)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(Color(hex: "555555"))
+                                }
+                                Spacer()
+                                Button("Actualizar") { locationManager.solicitarUbicacion() }
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color(hex: "3CB504"))
+                                Button("Quitar") { locationManager.limpiar() }
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color(hex: "E53935"))
+                            }
+                            .padding(12)
+                            .background(Color(hex: "D6F5D6"))
+                            .cornerRadius(10)
+                        }
+                    }
+
+                    // SECCIÓN 4 — Productos Recomendados (búsqueda debounced = API)
+                    SeccionCard(icono: "shippingbox", titulo: "Productos Recomendados") {
+
+                        // Buscador
+                        HStack(spacing: 8) {
+                            if buscandoProducto {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "3CB504")))
+                                    .scaleEffect(0.7)
+                                    .frame(width: 20)
+                            } else {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(Color(hex: "888888"))
+                                    .frame(width: 20)
+                            }
+                            TextField("Buscar en inventario...", text: $busquedaProducto)
+                                .font(.system(size: 13))
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                                .onChange(of: busquedaProducto) { _, query in
+                                    buscarProductos(query)
+                                }
+                            if !busquedaProducto.isEmpty {
+                                Button(action: {
+                                    busquedaProducto   = ""
+                                    resultadosBusqueda = []
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(Color(hex: "AAAAAA"))
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Color(hex: "F0FAF0"))
+                        .cornerRadius(10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(hex: "3CB504").opacity(0.35), lineWidth: 1)
+                        )
+
+                        // Dropdown de resultados — igual que Flutter ListView.builder de 8 items
+                        if !resultadosBusqueda.isEmpty {
+                            VStack(spacing: 0) {
+                                ForEach(Array(resultadosBusqueda.prefix(8).enumerated()), id: \.offset) { idx, art in
+                                    Button(action: { agregarProducto(art.nombre) }) {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "plus.circle")
+                                                .foregroundColor(Color(hex: "3CB504"))
+                                                .font(.system(size: 15))
+                                            Text(art.nombre)
+                                                .font(.system(size: 13))
+                                                .foregroundColor(Color(hex: "1A1A1A"))
+                                                .lineLimit(1)
+                                            Spacer()
+                                            if art.stockTotal > 0 {
+                                                Text("\(art.stockTotal) en stock")
+                                                    .font(.system(size: 11))
+                                                    .foregroundColor(Color(hex: "888888"))
+                                            }
+                                        }
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                    }
+                                    .buttonStyle(.plain)
+                                    if idx < min(resultadosBusqueda.count, 8) - 1 {
+                                        Divider().padding(.horizontal, 14)
+                                    }
+                                }
+                            }
                             .background(Color.white)
                             .cornerRadius(10)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color(hex: "3CB504"), lineWidth: 1.5)
+                                    .stroke(Color(hex: "3CB504").opacity(0.3), lineWidth: 1)
                             )
+                            .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
                         }
 
-                        // Resultado GPS
-                        if locationManager.latitud != nil {
-                            HStack(spacing: 8) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(Color(hex: "3CB504"))
-                                Text(locationManager.estado)
-                                    .font(.system(size: 13))
-                                    .foregroundColor(Color(hex: "555555"))
-                            }
-                            .padding(10)
-                            .background(Color(hex: "D6F5D6"))
-                            .cornerRadius(8)
-                        }
-                    }
-
-                    // SECCIÓN 4 — Productos Recomendados
-                    SeccionCard(icono: "shippingbox", titulo: "Productos Recomendados") {
-                        // Chips seleccionables
-                        FlowLayout(spacing: 8) {
-                            ForEach(productosDisponibles, id: \.self) { producto in
-                                let seleccionado = productosSeleccionados.contains(producto)
-                                Button(action: {
-                                    if seleccionado {
-                                        productosSeleccionados.remove(producto)
-                                    } else {
-                                        productosSeleccionados.insert(producto)
+                        // Chips con botón eliminar — igual que Chip onDeleted de Flutter
+                        if !productosSeleccionados.isEmpty {
+                            FlowLayout(spacing: 8) {
+                                ForEach(productosSeleccionados, id: \.self) { producto in
+                                    HStack(spacing: 4) {
+                                        Text(producto)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(Color(hex: "1E7A00"))
+                                        Button(action: {
+                                            productosSeleccionados.removeAll { $0 == producto }
+                                        }) {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(Color(hex: "1E7A00"))
+                                        }
                                     }
-                                }) {
-                                    Text(producto)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(seleccionado ? .white : Color(hex: "555555"))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 7)
-                                        .background(
-                                            seleccionado
-                                            ? Color(hex: "3CB504")
-                                            : Color.white
-                                        )
-                                        .cornerRadius(20)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 20)
-                                                .stroke(
-                                                    seleccionado ? Color.clear : Color(hex: "CCCCCC"),
-                                                    lineWidth: 1
-                                                )
-                                        )
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color(hex: "D6F5D6"))
+                                    .cornerRadius(20)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color(hex: "3CB504"), lineWidth: 1)
+                                    )
                                 }
                             }
                         }
                     }
 
-                    // SECCIÓN 5 — Notas y Observaciones
+                    // SECCIÓN 5 — Notas
                     SeccionCard(icono: "text.alignleft", titulo: "Notas y Observaciones") {
                         ZStack(alignment: .topLeading) {
                             if notas.isEmpty {
@@ -263,7 +353,6 @@ struct NuevaVisitaView: View {
                             }
                             TextEditor(text: $notas)
                                 .font(.system(size: 13))
-                                .foregroundColor(Color(hex: "1A1A1A"))
                                 .frame(minHeight: 100)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
@@ -277,161 +366,131 @@ struct NuevaVisitaView: View {
                         )
                     }
 
-                    // Espaciado para el botón flotante
                     Color.clear.frame(height: 80)
                 }
                 .padding(16)
             }
             .background(Color(hex: "F5F5F5"))
             .overlay(alignment: .bottom) {
+                Button(action: guardar) {
+                    ZStack {
+                        LinearGradient(
+                            colors: formularioValido
+                                ? [Color(hex: "3CB504"), Color(hex: "1E7A00")]
+                                : [Color(hex: "AAAAAA"), Color(hex: "888888")],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .cornerRadius(14)
 
-                // ── BOTÓN GUARDAR FLOTANTE ────────────────────────
-                Button(action: {
-                    if formularioValido {
-                        mostrarAlertaGuardado = true
+                        if visitasVM.guardando {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            HStack(spacing: 8) {
+                                Image(systemName: esEdicion ? "pencil.circle" : "square.and.arrow.down")
+                                Text(esEdicion ? "Actualizar Visita" : "Guardar Visita")
+                                    .font(.system(size: 16, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                        }
                     }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "square.and.arrow.down")
-                        Text("Guardar Visita")
-                            .font(.system(size: 16, weight: .bold))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        formularioValido
-                        ? LinearGradient(
-                            colors: [Color(hex: "3CB504"), Color(hex: "1E7A00")],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                          )
-                        : LinearGradient(
-                            colors: [Color(hex: "AAAAAA"), Color(hex: "888888")],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                          )
-                    )
-                    .cornerRadius(14)
+                    .frame(height: 52)
                     .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
                 }
+                .disabled(!formularioValido || visitasVM.guardando)
             }
         }
         .navigationBarHidden(true)
-        .alert("Visita guardada", isPresented: $mostrarAlertaGuardado) {
-            Button("OK") { dismiss() }
-        } message: {
-            Text("La visita de \(nombreProductor) en \(ranchoEjido) fue registrada correctamente.")
+        .onAppear {
+            cultivosVM.cargarCultivos()
+            poblarSiEdicion()
         }
-    }
-}
-
-// MARK: - Componentes reutilizables
-
-struct SeccionCard<Contenido: View>: View {
-    let icono: String
-    let titulo: String
-    let contenido: () -> Contenido
-
-    init(icono: String, titulo: String, @ViewBuilder contenido: @escaping () -> Contenido) {
-        self.icono = icono
-        self.titulo = titulo
-        self.contenido = contenido
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icono)
-                    .foregroundColor(Color(hex: "3CB504"))
-                    .font(.system(size: 15))
-                Text(titulo)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(Color(hex: "1A1A1A"))
+        .onChange(of: cultivosVM.cultivos) { _, cultivos in
+            if let v = visitaEditar, cultivoSeleccionado == nil {
+                cultivoSeleccionado = cultivos.first { $0.id == (v.cultivoId ?? 0) }
             }
-            contenido()
         }
-        .padding(16)
-        .background(Color.white)
-        .cornerRadius(14)
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
-    }
-}
-
-struct CampoTexto: View {
-    let icono: String
-    let placeholder: String
-    @Binding var texto: String
-
-    var body: some View {
-        HStack {
-            Image(systemName: icono)
-                .foregroundColor(Color(hex: "3CB504"))
-                .frame(width: 20)
-            TextField(placeholder, text: $texto)
-                .foregroundColor(Color(hex: "1A1A1A"))
-                .autocapitalization(.words)
-                .disableAutocorrection(true)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
-        .background(Color(hex: "F0FAF0"))
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(hex: "3CB504").opacity(0.4), lineWidth: 1)
-        )
-    }
-}
-
-// Layout de chips que hace wrap automático
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 0
-        var height: CGFloat = 0
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var maxHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > width {
-                y += maxHeight + spacing
-                x = 0
-                maxHeight = 0
+        .onChange(of: visitasVM.guardadoExitoso) { _, exitoso in
+            if exitoso {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { dismiss() }
             }
-            maxHeight = max(maxHeight, size.height)
-            x += size.width + spacing
-            height = y + maxHeight
         }
-        return CGSize(width: width, height: height)
+        .animation(.easeInOut(duration: 0.2), value: visitasVM.mensajeEstado)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var maxHeight: CGFloat = 0
+    // MARK: - Helpers
 
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX {
-                y += maxHeight + spacing
-                x = bounds.minX
-                maxHeight = 0
+    private func poblarSiEdicion() {
+        guard let v = visitaEditar else { return }
+        nombreProductor        = v.nombreProductor
+        ranchoEjido            = v.ranchoEjido
+        notas                  = v.notas
+        productosSeleccionados = v.productosRecomendados
+        if let lat = v.latitud, let lon = v.longitud {
+            locationManager.latitud  = lat
+            locationManager.longitud = lon
+            locationManager.estado   = String(format: "%.5f, %.5f", lat, lon)
+        }
+    }
+
+    private func guardar() {
+        guard let cultivo = cultivoSeleccionado else { return }
+        if esEdicion, let v = visitaEditar {
+            visitasVM.actualizarVisita(
+                visita:          v,
+                nombreProductor: nombreProductor,
+                ranchoEjido:     ranchoEjido,
+                cultivoId:       cultivo.id,
+                cultivoNombre:   cultivo.nombre,
+                latitud:         locationManager.latitud,
+                longitud:        locationManager.longitud,
+                notas:           notas,
+                productos:       productosSeleccionados,
+                modelContext:    modelContext
+            )
+        } else {
+            visitasVM.guardarVisita(
+                nombreProductor: nombreProductor,
+                ranchoEjido:     ranchoEjido,
+                cultivoId:       cultivo.id,
+                cultivoNombre:   cultivo.nombre,
+                latitud:         locationManager.latitud,
+                longitud:        locationManager.longitud,
+                notas:           notas,
+                productos:       productosSeleccionados,
+                modelContext:    modelContext
+            )
+        }
+    }
+
+    // Debounce 400 ms — igual que Timer(400ms) de Flutter
+    private func buscarProductos(_ query: String) {
+        searchTask?.cancel()
+        guard !query.isEmpty else { resultadosBusqueda = []; return }
+        buscandoProducto = true
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            do {
+                let dtos = try await APIService.shared.getArticulos(limit: 8, search: query)
+                await MainActor.run {
+                    resultadosBusqueda = dtos
+                    buscandoProducto   = false
+                }
+            } catch {
+                await MainActor.run { buscandoProducto = false }
             }
-            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            maxHeight = max(maxHeight, size.height)
-            x += size.width + spacing
         }
+    }
+
+    private func agregarProducto(_ nombre: String) {
+        guard !productosSeleccionados.contains(nombre) else { return }
+        productosSeleccionados.append(nombre)
+        busquedaProducto   = ""
+        resultadosBusqueda = []
     }
 }
 
-#Preview {
-    NavigationStack {
-        NuevaVisitaView()
-    }
-}
+#Preview { NavigationStack { NuevaVisitaView() } }

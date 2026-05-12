@@ -4,14 +4,13 @@
 //
 //  Created by Alumno on 06/05/26.
 //
-
 import SwiftUI
 import SwiftData
 
 // MARK: - LOGIN VIEWMODEL
 @MainActor
 class LoginViewModel: ObservableObject {
-    @Published var cargando: Bool = false
+    @Published var cargando = false
     @Published var error: String? = nil
 
     func iniciarSesion(
@@ -25,27 +24,14 @@ class LoginViewModel: ObservableObject {
         }
         cargando = true
         error = nil
-
         Task {
             do {
-                let resp = try await APIService.shared.login(
-                    username: username,
-                    password: password
-                )
-                APIService.shared.token = resp.token
+                try await APIService.shared.login(username: username, password: password)
                 estaAutenticado.wrappedValue = true
-
-            } catch APIError.sinConexion {
-                // Sin red — permite acceso temporal hardcoded
-                if username == "admin" && password == "1234" {
-                    estaAutenticado.wrappedValue = true
-                } else {
-                    self.error = "Sin conexión. Usa admin / 1234 para pruebas."
-                }
-
             } catch APIError.noAutorizado {
-                error = "Usuario o contraseña incorrectos."
-
+                self.error = "Usuario o contraseña incorrectos."
+            } catch APIError.sinConexion {
+                self.error = "Sin conexión al servidor."
             } catch let err {
                 self.error = err.localizedDescription
             }
@@ -58,62 +44,88 @@ class LoginViewModel: ObservableObject {
 @MainActor
 class ProductosViewModel: ObservableObject {
     @Published var productos: [ProductoLocal] = []
-    @Published var cargando: Bool = false
-    @Published var modoOffline: Bool = false
+    @Published var cargando  = false
+    @Published var modoOffline = false
     @Published var error: String? = nil
 
     func cargarProductos(modelContext: ModelContext) {
         cargando = true
         modoOffline = false
         error = nil
-
         Task {
             do {
-                // 1. Intentar cargar desde API
-                let dtos = try await APIService.shared.obtenerProductos()
-
-                // 2. Limpiar cache viejo
-                let descriptor = FetchDescriptor<ProductoLocal>()
-                let existentes = (try? modelContext.fetch(descriptor)) ?? []
-                for p in existentes { modelContext.delete(p) }
-
-                // 3. Guardar nuevo cache en SwiftData
-                for dto in dtos {
-                    let local = ProductoLocal(
-                        id: dto.id,
-                        nombre: dto.nombre,
-                        categoria: dto.categoria,
-                        precio: dto.precio,
-                        stock: dto.stock,
-                        unidad: dto.unidad,
-                        descripcion: dto.descripcion
-                    )
-                    modelContext.insert(local)
-                }
+                let dtos = try await APIService.shared.getArticulos(page: 1, limit: 200)
+                let viejos = (try? modelContext.fetch(FetchDescriptor<ProductoLocal>())) ?? []
+                viejos.forEach { modelContext.delete($0) }
+                let nuevos = dtos.map { ProductoLocal(from: $0) }
+                nuevos.forEach { modelContext.insert($0) }
                 try? modelContext.save()
-
-                // 4. Cargar en la vista
-                let nuevo = FetchDescriptor<ProductoLocal>(
-                    sortBy: [SortDescriptor(\.nombre)]
-                )
-                productos = (try? modelContext.fetch(nuevo)) ?? []
-
-            } catch {
-                // Sin red — usar cache local
+                productos = nuevos
+            } catch APIError.sinConexion {
                 modoOffline = true
-                let descriptor = FetchDescriptor<ProductoLocal>(
-                    sortBy: [SortDescriptor(\.nombre)]
-                )
-                let cache = (try? modelContext.fetch(descriptor)) ?? []
-
-                if cache.isEmpty {
-                    // Sin cache y sin red — datos de prueba
-                  //  productos = ProductoLocal.ejemplos
-                    self.error = "Sin conexión ni cache. Mostrando datos de ejemplo."
-                } else {
-                    productos = cache
-                }
+                let descriptor = FetchDescriptor<ProductoLocal>(sortBy: [SortDescriptor(\.nombre)])
+                productos = (try? modelContext.fetch(descriptor)) ?? []
+                if productos.isEmpty { error = "Sin conexión y sin cache local." }
+            } catch let decErr as DecodingError {
+                #if DEBUG
+                print("❌ DecodingError artículos: \(decErr)")
+                #endif
+                error = "Error al leer la respuesta del servidor. Revisa la consola."
+            } catch let apiErr as APIError {
+                error = apiErr.localizedDescription
+            } catch {
+                self.error = error.localizedDescription
             }
+            cargando = false
+        }
+    }
+
+    func buscar(_ texto: String, modelContext: ModelContext) {
+        guard !texto.isEmpty else { cargarProductos(modelContext: modelContext); return }
+        cargando = true
+        error = nil
+        Task {
+            do {
+                let dtos = try await APIService.shared.getArticulos(search: texto)
+                productos = dtos.map { ProductoLocal(from: $0) }
+            } catch APIError.sinConexion {
+                let pred = #Predicate<ProductoLocal> { $0.nombre.localizedStandardContains(texto) }
+                productos = (try? modelContext.fetch(FetchDescriptor<ProductoLocal>(predicate: pred))) ?? []
+            } catch let decErr as DecodingError {
+                #if DEBUG
+                print("❌ DecodingError búsqueda: \(decErr)")
+                #endif
+                error = "Error al leer la respuesta del servidor."
+            } catch {
+                self.error = error.localizedDescription
+            }
+            cargando = false
+        }
+    }
+}
+
+// MARK: - CULTIVOS VIEWMODEL
+@MainActor
+class CultivosViewModel: ObservableObject {
+    @Published var cultivos: [CultivoDTO] = []
+    @Published var cargando = false
+
+    let cultivosFallback: [CultivoDTO] = [
+        CultivoDTO(id: 1,  nombre: "Maíz"),
+        CultivoDTO(id: 2,  nombre: "Soya"),
+        CultivoDTO(id: 3,  nombre: "Sorgo"),
+        CultivoDTO(id: 4,  nombre: "Caña de azúcar"),
+        CultivoDTO(id: 5,  nombre: "Frijol"),
+        CultivoDTO(id: 6,  nombre: "Chile"),
+        CultivoDTO(id: 7,  nombre: "Tomate"),
+        CultivoDTO(id: 11, nombre: "Otro"),
+    ]
+
+    func cargarCultivos() {
+        cargando = true
+        Task {
+            do { cultivos = try await APIService.shared.getCultivos() }
+            catch { cultivos = cultivosFallback }
             cargando = false
         }
     }
@@ -122,36 +134,32 @@ class ProductosViewModel: ObservableObject {
 // MARK: - VISITAS VIEWMODEL
 @MainActor
 class VisitasViewModel: ObservableObject {
-    @Published var guardando: Bool = false
-    @Published var guardadoExitoso: Bool = false
-    @Published var mensajeEstado: String = ""
-    @Published var sincronizando: Bool = false
-    @Published var resultadoSync: (subidas: Int, errores: Int)? = nil
+    @Published var guardando       = false
+    @Published var guardadoExitoso = false
+    @Published var mensajeEstado   = ""
+    @Published var sincronizando   = false
+    @Published var resultadoSync: (creadas: Int, duplicadas: Int)? = nil
 
-    // ── Guardar visita nueva ─────────────────────────────────────
+    // ── NUEVA VISITA ─────────────────────────────────────────────
     func guardarVisita(
         nombreProductor: String,
         ranchoEjido: String,
-        cultivo: String,
+        cultivoId: Int,
+        cultivoNombre: String,
         latitud: Double?,
         longitud: Double?,
         notas: String,
         productos: [String],
         modelContext: ModelContext
     ) {
-        guard !nombreProductor.isEmpty && !ranchoEjido.isEmpty && !cultivo.isEmpty else {
-            mensajeEstado = "Completa los campos obligatorios."
-            return
-        }
-
         guardando = true
-        mensajeEstado = ""
+        guardadoExitoso = false
 
-        // 1. SIEMPRE guardar local primero (offline-first)
         let visitaLocal = VisitaLocal(
             nombreProductor: nombreProductor,
             ranchoEjido: ranchoEjido,
-            cultivo: cultivo,
+            cultivoId: cultivoId,
+            cultivoNombre: cultivoNombre,
             latitud: latitud,
             longitud: longitud,
             notas: notas,
@@ -160,26 +168,64 @@ class VisitasViewModel: ObservableObject {
         modelContext.insert(visitaLocal)
         try? modelContext.save()
 
-        // 2. Intentar subir a la API
         Task {
             do {
-                let resp = try await APIService.shared.subirVisita(visitaLocal)
+                try await APIService.shared.subirVisita(visitaLocal)
                 visitaLocal.sincronizado = true
-                visitaLocal.idRemoto = resp.id
                 try? modelContext.save()
-                mensajeEstado = "Visita guardada y sincronizada."
-
+                mensajeEstado = "Visita guardada y sincronizada ✓"
             } catch {
-                // Sin red — queda pendiente para sincronizar después
-                mensajeEstado = "Guardada localmente. Se sincronizará cuando haya conexión."
+                mensajeEstado = "Guardada localmente. Se sincronizará con conexión."
             }
-
             guardando = false
             guardadoExitoso = true
         }
     }
 
-    // ── Sincronizar todas las visitas pendientes ─────────────────
+    // ── EDITAR VISITA ────────────────────────────────────────────
+    // Equivalente a actualizarVisita() en Flutter
+    func actualizarVisita(
+        visita: VisitaLocal,
+        nombreProductor: String,
+        ranchoEjido: String,
+        cultivoId: Int,
+        cultivoNombre: String,
+        latitud: Double?,
+        longitud: Double?,
+        notas: String,
+        productos: [String],
+        modelContext: ModelContext
+    ) {
+        guardando = true
+        guardadoExitoso = false
+
+        // Mutar la visita existente en SwiftData
+        visita.nombreProductor      = nombreProductor
+        visita.ranchoEjido          = ranchoEjido
+        visita.cultivoId            = cultivoId
+        visita.cultivoNombre        = cultivoNombre
+        visita.latitud              = latitud
+        visita.longitud             = longitud
+        visita.notas                = notas
+        visita.productosRecomendados = productos
+        visita.sincronizado         = false
+        try? modelContext.save()
+
+        Task {
+            do {
+                try await APIService.shared.subirVisita(visita)
+                visita.sincronizado = true
+                try? modelContext.save()
+                mensajeEstado = "Visita actualizada y sincronizada ✓"
+            } catch {
+                mensajeEstado = "Actualizada localmente. Se sincronizará con conexión."
+            }
+            guardando = false
+            guardadoExitoso = true
+        }
+    }
+
+    // ── SYNC MASIVO ──────────────────────────────────────────────
     func sincronizarPendientes(modelContext: ModelContext) {
         sincronizando = true
         resultadoSync = nil
@@ -190,27 +236,30 @@ class VisitasViewModel: ObservableObject {
             )
             let pendientes = (try? modelContext.fetch(descriptor)) ?? []
 
-            var subidas = 0
-            var errores = 0
-
-            for visita in pendientes {
-                do {
-                    let resp = try await APIService.shared.subirVisita(visita)
-                    visita.sincronizado = true
-                    visita.idRemoto = resp.id
-                    subidas += 1
-                } catch {
-                    errores += 1
-                }
+            guard !pendientes.isEmpty else {
+                mensajeEstado = "No hay visitas pendientes"
+                sincronizando = false
+                resultadoSync = (creadas: 0, duplicadas: 0)
+                return
             }
 
-            try? modelContext.save()
-            resultadoSync = (subidas: subidas, errores: errores)
+            do {
+                let resultado = try await APIService.shared.sincronizarVisitas(pendientes)
+                pendientes.forEach { $0.sincronizado = true }
+                try? modelContext.save()
+                resultadoSync = (
+                    creadas:    resultado.creadas    ?? 0,
+                    duplicadas: resultado.duplicadas ?? 0
+                )
+                mensajeEstado = "\(resultado.creadas ?? 0) nuevas, \(resultado.duplicadas ?? 0) ya existían"
+            } catch {
+                mensajeEstado = "Sin conexión al servidor"
+                resultadoSync = (creadas: 0, duplicadas: 0)
+            }
             sincronizando = false
         }
     }
 
-    // ── Contar pendientes (para el badge en Dashboard) ───────────
     func contarPendientes(modelContext: ModelContext) -> Int {
         let descriptor = FetchDescriptor<VisitaLocal>(
             predicate: #Predicate { !$0.sincronizado }
@@ -223,18 +272,15 @@ class VisitasViewModel: ObservableObject {
 @MainActor
 class HistorialViewModel: ObservableObject {
     @Published var visitas: [VisitaLocal] = []
-    @Published var cargando: Bool = false
 
     func cargarHistorial(modelContext: ModelContext) {
-        cargando = true
         let descriptor = FetchDescriptor<VisitaLocal>(
             sortBy: [SortDescriptor(\.fechaVisita, order: .reverse)]
         )
         visitas = (try? modelContext.fetch(descriptor)) ?? []
-        cargando = false
     }
 
-    func eliminarVisita(_ visita: VisitaLocal, modelContext: ModelContext) {
+    func eliminar(_ visita: VisitaLocal, modelContext: ModelContext) {
         modelContext.delete(visita)
         try? modelContext.save()
         cargarHistorial(modelContext: modelContext)

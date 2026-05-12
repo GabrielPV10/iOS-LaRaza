@@ -13,19 +13,21 @@ class VisitaLocal {
     var id: UUID
     var nombreProductor: String
     var ranchoEjido: String
-    var cultivo: String
+    var cultivoId: Int?        
+    var cultivoNombre: String
     var latitud: Double?
     var longitud: Double?
     var notas: String
     var productosRecomendados: [String]
     var fechaVisita: Date
-    var sincronizado: Bool       // false = pendiente de subir a la API
-    var idRemoto: Int?           // ID asignado por PostgreSQL al sincronizar
+    var sincronizado: Bool
+    var idRemoto: Int?
 
     init(
         nombreProductor: String,
         ranchoEjido: String,
-        cultivo: String,
+        cultivoId: Int? = nil,
+        cultivoNombre: String = "",
         latitud: Double? = nil,
         longitud: Double? = nil,
         notas: String = "",
@@ -34,7 +36,8 @@ class VisitaLocal {
         self.id = UUID()
         self.nombreProductor = nombreProductor
         self.ranchoEjido = ranchoEjido
-        self.cultivo = cultivo
+        self.cultivoId = cultivoId
+        self.cultivoNombre = cultivoNombre
         self.latitud = latitud
         self.longitud = longitud
         self.notas = notas
@@ -48,23 +51,24 @@ class VisitaLocal {
 @Model
 class ProductoLocal {
     var id: Int
+    var clave: String
     var nombre: String
-    var categoria: String
-    var precio: Double
-    var stock: Double
-    var unidad: String
     var descripcion: String
+    var precio: Double
+    var precioMayoreo: Double
+    var stock: Int
+    var marca: String
     var ultimaActualizacion: Date
 
-    init(id: Int, nombre: String, categoria: String,
-         precio: Double, stock: Double, unidad: String, descripcion: String) {
-        self.id = id
-        self.nombre = nombre
-        self.categoria = categoria
-        self.precio = precio
-        self.stock = stock
-        self.unidad = unidad
-        self.descripcion = descripcion
+    init(from dto: ArticuloDTO) {
+        self.id = dto.id
+        self.clave = dto.clave
+        self.nombre = dto.nombre
+        self.descripcion = dto.descripcion ?? ""
+        self.precio = dto.precio
+        self.precioMayoreo = dto.precioReferencia ?? 0
+        self.stock = dto.stockTotal
+        self.marca = dto.marca ?? ""
         self.ultimaActualizacion = Date()
     }
 }
@@ -87,5 +91,34 @@ class SesionLocal {
         self.username = username
         self.rol = rol
         self.expiracion = expiracion
+    }
+}
+
+
+// En ModelosLocales.swift, dentro de la clase VisitaLocal
+// agrega esta extensión al final del archivo:
+
+extension VisitaLocal {
+    // Convierte al DTO que espera el backend
+    // igual que toBackendJson() en Flutter
+    func toRequest() -> VisitaRequest {
+        let prods = productosRecomendados.map {
+            ProductoRecomendadoDTO(articuloNombre: $0)
+        }
+
+        let formatter = ISO8601DateFormatter()
+        let fechaStr = formatter.string(from: fechaVisita)
+
+        return VisitaRequest(
+            idLocal: id.uuidString,          // UUID como string
+            productor: nombreProductor,
+            rancho: ranchoEjido,
+            cultivoId: cultivoId ?? 0,
+            latitud: latitud,
+            longitud: longitud,
+            notas: notas,
+            fechaVisita: fechaStr,
+            productosRecomendados: prods
+        )
     }
 }
