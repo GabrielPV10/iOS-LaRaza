@@ -146,6 +146,8 @@ class VisitasViewModel: ObservableObject {
         ranchoEjido: String,
         cultivoId: Int,
         cultivoNombre: String,
+        modo: String,           // ← agrega
+        especie: String?,       // ← agrega
         latitud: Double?,
         longitud: Double?,
         notas: String,
@@ -156,30 +158,23 @@ class VisitasViewModel: ObservableObject {
         guardadoExitoso = false
 
         let visitaLocal = VisitaLocal(
-            nombreProductor: nombreProductor,
-            ranchoEjido: ranchoEjido,
-            cultivoId: cultivoId,
-            cultivoNombre: cultivoNombre,
-            latitud: latitud,
-            longitud: longitud,
-            notas: notas,
-            productosRecomendados: productos
-        )
+                nombreProductor: nombreProductor,
+                ranchoEjido: ranchoEjido,
+                cultivoId: cultivoId,
+                cultivoNombre: cultivoNombre,
+                modo: modo,         // ← agrega
+                especie: especie,   // ← agrega
+                latitud: latitud,
+                longitud: longitud,
+                notas: notas,
+                productosRecomendados: productos
+            )
         modelContext.insert(visitaLocal)
         try? modelContext.save()
 
-        Task {
-            do {
-                try await APIService.shared.subirVisita(visitaLocal)
-                visitaLocal.sincronizado = true
-                try? modelContext.save()
-                mensajeEstado = "Visita guardada y sincronizada ✓"
-            } catch {
-                mensajeEstado = "Guardada localmente. Se sincronizará con conexión."
-            }
-            guardando = false
-            guardadoExitoso = true
-        }
+        mensajeEstado = "Visita guardada. Sincronízala cuando estés listo."
+        guardando = false
+        guardadoExitoso = true
     }
 
     // ── EDITAR VISITA ────────────────────────────────────────────
@@ -211,18 +206,9 @@ class VisitasViewModel: ObservableObject {
         visita.sincronizado         = false
         try? modelContext.save()
 
-        Task {
-            do {
-                try await APIService.shared.subirVisita(visita)
-                visita.sincronizado = true
-                try? modelContext.save()
-                mensajeEstado = "Visita actualizada y sincronizada ✓"
-            } catch {
-                mensajeEstado = "Actualizada localmente. Se sincronizará con conexión."
-            }
-            guardando = false
-            guardadoExitoso = true
-        }
+        mensajeEstado = "Visita actualizada. Sincronízala cuando estés listo."
+        guardando = false
+        guardadoExitoso = true
     }
 
     // ── SYNC MASIVO ──────────────────────────────────────────────
@@ -272,12 +258,15 @@ class VisitasViewModel: ObservableObject {
 @MainActor
 class HistorialViewModel: ObservableObject {
     @Published var visitas: [VisitaLocal] = []
+    @Published var cargando = false
 
     func cargarHistorial(modelContext: ModelContext) {
+        cargando = true
         let descriptor = FetchDescriptor<VisitaLocal>(
             sortBy: [SortDescriptor(\.fechaVisita, order: .reverse)]
         )
-        visitas = (try? modelContext.fetch(descriptor)) ?? []
+        visitas  = (try? modelContext.fetch(descriptor)) ?? []
+        cargando = false
     }
 
     func eliminar(_ visita: VisitaLocal, modelContext: ModelContext) {

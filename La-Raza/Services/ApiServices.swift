@@ -7,7 +7,7 @@ import Foundation
 
 // MARK: - Configuración
 struct APIConfig {
-    static let baseURL = "http://159.203.177.14/api"
+    static let baseURL = "https://laraza.mooo.com/api"
 }
 
 // MARK: - Errores
@@ -136,11 +136,14 @@ struct CultivosResponse: Codable {
 }
 
 // Visita para enviar al backend
+// VisitaRequest — agrega modo y especie
 struct VisitaRequest: Codable {
     let idLocal: String
     let productor: String
     let rancho: String
     let cultivoId: Int
+    let modo: String              // ← NUEVO
+    let especie: String?          // ← NUEVO
     let latitud: Double?
     let longitud: Double?
     let notas: String
@@ -149,7 +152,7 @@ struct VisitaRequest: Codable {
 
     enum CodingKeys: String, CodingKey {
         case idLocal             = "id_local"
-        case productor, rancho, latitud, longitud, notas
+        case productor, rancho, latitud, longitud, notas, modo, especie
         case cultivoId           = "cultivo_id"
         case fechaVisita         = "fecha_visita"
         case productosRecomendados = "productos_recomendados"
@@ -272,6 +275,19 @@ class APIService {
         let req  = try buildRequest(endpoint: "/inventario/articulos/\(id)")
         let data = try await execute(req)
         return try JSONDecoder().decode(ArticuloDTO.self, from: data)
+    }
+
+    func getArticulosParaVisita(search: String) async throws -> [ArticuloDTO] {
+        var endpoint = "/inventario/articulos?limit=15"
+        if !search.isEmpty {
+            let encoded = search.addingPercentEncoding(
+                withAllowedCharacters: .urlQueryAllowed) ?? ""
+            endpoint += "&search=\(encoded)"
+        }
+        let req  = try buildRequest(endpoint: endpoint)
+        let data = try await execute(req)
+        let resp = try JSONDecoder().decode(ArticulosResponse.self, from: data)
+        return resp.data
     }
 
     // ── CULTIVOS ─────────────────────────────────────────────────

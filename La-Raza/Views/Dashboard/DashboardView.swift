@@ -68,6 +68,7 @@ struct DashboardView: View {
                         }
 
                         Button(action: {
+                            APIService.shared.logout()
                             estaAutenticado = false
                         }) {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
@@ -133,6 +134,11 @@ struct DashboardView: View {
                                         .buttonStyle(.plain)
                                     } else if modulo.titulo == "Historial" {
                                         NavigationLink(destination: HistorialView()) {
+                                            ModuloCard(modulo: modulo)
+                                        }
+                                        .buttonStyle(.plain)
+                                    } else if modulo.titulo == "Sincronizar" {
+                                        NavigationLink(destination: SincronizarView()) {
                                             ModuloCard(modulo: modulo)
                                         }
                                         .buttonStyle(.plain)

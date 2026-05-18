@@ -7,5 +7,7 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>La Raza usa tu ubicación para registrarla en la visita de campo.</string>
 </dict>
 </plist>

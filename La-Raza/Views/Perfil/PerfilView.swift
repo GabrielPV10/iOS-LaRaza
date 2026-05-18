@@ -118,6 +118,7 @@ struct PerfilView: View {
 
                     // ── BOTÓN CERRAR SESIÓN ──────────────────────
                     Button(action: {
+                        APIService.shared.logout()
                         estaAutenticado = false
                     }) {
                         HStack(spacing: 8) {

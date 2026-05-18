@@ -13,8 +13,10 @@ class VisitaLocal {
     var id: UUID
     var nombreProductor: String
     var ranchoEjido: String
-    var cultivoId: Int?        
+    var cultivoId: Int
     var cultivoNombre: String
+    var modo: String              // ← NUEVO: "cultivo" | "veterinario"
+    var especie: String?          // ← NUEVO: solo veterinario
     var latitud: Double?
     var longitud: Double?
     var notas: String
@@ -26,8 +28,10 @@ class VisitaLocal {
     init(
         nombreProductor: String,
         ranchoEjido: String,
-        cultivoId: Int? = nil,
+        cultivoId: Int = 0,
         cultivoNombre: String = "",
+        modo: String = "cultivo",
+        especie: String? = nil,
         latitud: Double? = nil,
         longitud: Double? = nil,
         notas: String = "",
@@ -38,6 +42,8 @@ class VisitaLocal {
         self.ranchoEjido = ranchoEjido
         self.cultivoId = cultivoId
         self.cultivoNombre = cultivoNombre
+        self.modo = modo
+        self.especie = especie
         self.latitud = latitud
         self.longitud = longitud
         self.notas = notas
@@ -48,6 +54,30 @@ class VisitaLocal {
     }
 }
 
+// toRequest() refleja exactamente toBackendJson() de Flutter
+extension VisitaLocal {
+    func toRequest() -> VisitaRequest {
+        let prods = productosRecomendados.map {
+            ProductoRecomendadoDTO(articuloNombre: $0)
+        }
+        let formatter = ISO8601DateFormatter()
+        return VisitaRequest(
+            idLocal: id.uuidString,
+            productor: nombreProductor,
+            rancho: ranchoEjido,
+            cultivoId: cultivoId,
+            modo: modo,
+            especie: especie,
+            latitud: latitud,
+            longitud: longitud,
+            notas: notas,
+            fechaVisita: formatter.string(from: fechaVisita),
+            productosRecomendados: prods
+        )
+    }
+}
+
+// MARK: - ProductoLocal
 @Model
 class ProductoLocal {
     var id: Int
@@ -73,52 +103,7 @@ class ProductoLocal {
     }
 }
 
-// ── SESION LOCAL ─────────────────────────────────────────────────
-// Guarda el JWT para no pedir login cada vez
-@Model
-class SesionLocal {
-    var token: String
-    var username: String
-    var rol: String
-    var expiracion: Date
-
-    var estaVigente: Bool {
-        Date() < expiracion
-    }
-
-    init(token: String, username: String, rol: String, expiracion: Date) {
-        self.token = token
-        self.username = username
-        self.rol = rol
-        self.expiracion = expiracion
-    }
+extension ProductoLocal {
+    static let ejemplos: [ProductoLocal] = []
 }
 
-
-// En ModelosLocales.swift, dentro de la clase VisitaLocal
-// agrega esta extensión al final del archivo:
-
-extension VisitaLocal {
-    // Convierte al DTO que espera el backend
-    // igual que toBackendJson() en Flutter
-    func toRequest() -> VisitaRequest {
-        let prods = productosRecomendados.map {
-            ProductoRecomendadoDTO(articuloNombre: $0)
-        }
-
-        let formatter = ISO8601DateFormatter()
-        let fechaStr = formatter.string(from: fechaVisita)
-
-        return VisitaRequest(
-            idLocal: id.uuidString,          // UUID como string
-            productor: nombreProductor,
-            rancho: ranchoEjido,
-            cultivoId: cultivoId ?? 0,
-            latitud: latitud,
-            longitud: longitud,
-            notas: notas,
-            fechaVisita: fechaStr,
-            productosRecomendados: prods
-        )
-    }
-}
