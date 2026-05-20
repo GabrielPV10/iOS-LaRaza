@@ -515,20 +515,35 @@ struct NuevaVisitaView: View {
                         cultivoNombreFinal = cultivoNombreSeleccionado
                     }
 
-                    vm.guardarVisita(
-                        nombreProductor: nombreProductor,
-                        ranchoEjido: ranchoEjido,
-                        cultivoId: cultivoFinal,
-                        cultivoNombre: cultivoNombreFinal,
-                        modo: modo,
-                        especie: modo == "veterinario"
-                            ? especieSeleccionada : nil,
-                        latitud: locationManager.latitud,
-                        longitud: locationManager.longitud,
-                        notas: notas,
-                        productos: productosSeleccionados,
-                        modelContext: modelContext
-                    )
+                    if esEdicion, let visita = visitaEditar {
+                        vm.actualizarVisita(
+                            visita: visita,
+                            nombreProductor: nombreProductor,
+                            ranchoEjido: ranchoEjido,
+                            cultivoId: cultivoFinal,
+                            cultivoNombre: cultivoNombreFinal,
+                            latitud: locationManager.latitud,
+                            longitud: locationManager.longitud,
+                            notas: notas,
+                            productos: productosSeleccionados,
+                            modelContext: modelContext
+                        )
+                    } else {
+                        vm.guardarVisita(
+                            nombreProductor: nombreProductor,
+                            ranchoEjido: ranchoEjido,
+                            cultivoId: cultivoFinal,
+                            cultivoNombre: cultivoNombreFinal,
+                            modo: modo,
+                            especie: modo == "veterinario"
+                                ? especieSeleccionada : nil,
+                            latitud: locationManager.latitud,
+                            longitud: locationManager.longitud,
+                            notas: notas,
+                            productos: productosSeleccionados,
+                            modelContext: modelContext
+                        )
+                    }
                 }) {
                     HStack(spacing: 8) {
                         if vm.guardando {

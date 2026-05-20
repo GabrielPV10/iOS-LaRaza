@@ -68,7 +68,7 @@ class ProductosViewModel: ObservableObject {
                 if productos.isEmpty { error = "Sin conexión y sin cache local." }
             } catch let decErr as DecodingError {
                 #if DEBUG
-                print("❌ DecodingError artículos: \(decErr)")
+                print("DecodingError artículos: \(decErr)")
                 #endif
                 error = "Error al leer la respuesta del servidor. Revisa la consola."
             } catch let apiErr as APIError {
@@ -93,7 +93,7 @@ class ProductosViewModel: ObservableObject {
                 productos = (try? modelContext.fetch(FetchDescriptor<ProductoLocal>(predicate: pred))) ?? []
             } catch let decErr as DecodingError {
                 #if DEBUG
-                print("❌ DecodingError búsqueda: \(decErr)")
+                print("DecodingError búsqueda: \(decErr)")
                 #endif
                 error = "Error al leer la respuesta del servidor."
             } catch {
@@ -247,7 +247,7 @@ class VisitasViewModel: ObservableObject {
     }
 
     func contarPendientes(modelContext: ModelContext) -> Int {
-        let descriptor = FetchDescriptor<VisitaLocal>(
+        let descriptor = FetchDescriptor<VisitaLocal>(	 
             predicate: #Predicate { !$0.sincronizado }
         )
         return (try? modelContext.fetch(descriptor))?.count ?? 0
